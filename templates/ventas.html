@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid">
+    <h2 class="fw-bold mb-4"><i class="fas fa-cash-register me-2"></i>Ventas</h2>
+
+    <div class="row">
+        <!-- Formulario de venta -->
+        <div class="col-lg-5 mb-4">
+            <div class="card card-stats">
+                <div class="card-body">
+                    <h5 class="fw-bold mb-3">Registrar Venta</h5>
+                    <form method="POST" action="/ventas" id="formVenta">
+                        <div class="mb-3">
+                            <label class="form-label">Fecha *</label>
+                            <input type="date" name="fecha" class="form-control" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Pieza *</label>
+                            <select name="pieza_id" id="pieza_id" class="form-select" required>
+                                <option value="">Seleccionar...</option>
+                                {% for p in piezas %}
+                                <option value="{{ p.id }}" data-precio="{{ p.precio_venta or 0 }}">
+                                    {{ p.nombre_interno }} (Stock: {{ p.stock_actual }})
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Cantidad *</label>
+                                <input type="number" name="cantidad" id="cantidad" class="form-control" min="1" value="1" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label">Precio Unitario *</label>
+                                <input type="number" step="0.01" name="precio_unitario" id="precio_unitario" class="form-control" required>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Total</label>
+                            <input type="text" id="total" class="form-control" readonly>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Cliente</label>
+                            <input type="text" name="cliente" class="form-control">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Número de Factura</label>
+                            <input type="text" name="numero_factura" class="form-control">
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="fas fa-save me-1"></i> Registrar Venta
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Historial de ventas -->
+        <div class="col-lg-7">
+            <div class="card card-stats">
+                <div class="card-body">
+                    <h5 class="fw-bold mb-3">Últimas Ventas</h5>
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Fecha</th>
+                                    <th>Pieza</th>
+                                    <th>Cant.</th>
+                                    <th>Precio</th>
+                                    <th>Total</th>
+                                    <th>Cliente</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for v in ventas %}
+                                <tr>
+                                    <td>{{ v.fecha.strftime('%d/%m/%Y') if v.fecha else '' }}</td>
+                                    <td>{{ v.nombre_interno }}</td>
+                                    <td>{{ v.cantidad }}</td>
+                                    <td>${{ "%.2f"|format(v.precio_unitario) }}</td>
+                                    <td class="fw-semibold">${{ "%.2f"|format(v.total) }}</td>
+                                    <td>{{ v.cliente or '-' }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Fecha por defecto hoy
+document.addEventListener('DOMContentLoaded', () => {
+    const hoy = new Date().toISOString().split('T')[0];
+    document.querySelector('input[name="fecha"]').value = hoy;
+});
+
+// Autocompletar precio de venta al seleccionar pieza
+document.getElementById('pieza_id').addEventListener('change', function() {
+    const selected = this.options[this.selectedIndex];
+    const precio = selected.getAttribute('data-precio');
+    if (precio && parseFloat(precio) > 0) {
+        document.getElementById('precio_unitario').value = parseFloat(precio).toFixed(2);
+    }
+    calcularTotal();
+});
+
+// Calcular total automáticamente
+document.getElementById('cantidad').addEventListener('input', calcularTotal);
+document.getElementById('precio_unitario').addEventListener('input', calcularTotal);
+
+function calcularTotal() {
+    const cantidad = parseFloat(document.getElementById('cantidad').value) || 0;
+    const precio = parseFloat(document.getElementById('precio_unitario').value) || 0;
+    document.getElementById('total').value = (cantidad * precio).toFixed(2);
+}
+</script>
+{% endblock %}
