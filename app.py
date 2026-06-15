@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for
 import os
 import psycopg2
 import psycopg2.extras
+import psycopg2.errors  # <-- Necesario para UniqueViolation
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 
@@ -259,7 +260,7 @@ def agregar_pieza():
         conn.commit()
         conn.close()
         return jsonify({'success': True})
-    except psycopg2.IntegrityError:
+    except psycopg2.errors.UniqueViolation:
         conn.close()
         return jsonify({'error': 'El SKU ya existe. Use un código único.'}), 400
 
@@ -301,7 +302,7 @@ def editar_pieza(id):
         conn.commit()
         conn.close()
         return jsonify({'success': True})
-    except psycopg2.IntegrityError:
+    except psycopg2.errors.UniqueViolation:
         conn.close()
         return jsonify({'error': 'El SKU ya existe. Use un código único.'}), 400
 
