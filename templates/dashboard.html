@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="fw-bold"><i class="fas fa-tachometer-alt me-2"></i>Dashboard</h2>
+        <span class="text-muted" id="fecha-actual"></span>
+    </div>
+
+    <!-- Filtros -->
+    <div class="card card-stats mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Fecha Inicio</label>
+                    <input type="date" id="fecha_inicio" class="form-control">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Fecha Fin</label>
+                    <input type="date" id="fecha_fin" class="form-control">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label fw-semibold">Agrupar por</label>
+                    <select id="agrupar_por" class="form-select">
+                        <option value="dia">Día</option>
+                        <option value="mes">Mes</option>
+                        <option value="año">Año</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Proveedor</label>
+                    <select id="proveedor_id" class="form-select">
+                        <option value="">Todos los proveedores</option>
+                        {% for p in proveedores %}
+                        <option value="{{ p.id }}">{{ p.nombre }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-1">
+                    <button class="btn btn-primary w-100" onclick="cargarDashboard()">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tarjetas de resumen -->
+    <div class="row mb-4" id="tarjetas-resumen">
+        <!-- Se llenan dinámicamente -->
+    </div>
+
+    <!-- Gráfico principal -->
+    <div class="row mb-4">
+        <div class="col-lg-8">
+            <div class="card card-stats">
+                <div class="card-body">
+                    <h5 class="fw-bold mb-3">Evolución de Ventas</h5>
+                    <canvas id="graficoVentas" height="100"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card card-stats">
+                <div class="card-body">
+                    <h5 class="fw-bold mb-3">Top 10 Piezas Más Vendidas</h5>
+                    <div id="top-piezas" class="list-group list-group-flush"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Alertas de stock bajo -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card card-stats">
+                <div class="card-body">
+                    <h5 class="fw-bold mb-3"><i class="fas fa-exclamation-triangle text-warning me-2"></i>Stock Bajo</h5>
+                    <div id="alertas-stock" class="row"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Configurar fechas por defecto (últimos 30 días)
+const hoy = new Date();
+const hace30 = new Date();
+hace30.setDate(hoy.getDate() - 30);
+
+document.getElementById('fecha_inicio').value = hace30.toISOString().split('T')[0];
+document.getElementById('fecha_fin').value = hoy.toISOString().split('T')[0];
+document.getElementById('fecha-actual').textContent = hoy.toLocaleDateString('es-MX', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+
+let graficoVentas = null;
+
+async function cargarDashboard() {
+    const params = new URLSearchParams({
+        fecha_inicio: document.getElementById('fecha_inicio').value,
+        fecha_fin: document.getElementById('fecha_fin').value,
+        agrupar_por: document.getElementById('agrupar_por').value,
+        proveedor_id: document.getElementById('proveedor_id').value
+    });
+
+    try {
+        const response = await fetch(`/api/dashboard/datos?${params}`);
+        const datos = await response.json();
+
+        // Tarjetas de resumen
+        const totalVentas = datos.ventas.reduce((sum, v) => sum + parseFloat(v.total_ventas), 0);
+        const numVentas = datos.ventas.reduce((sum, v) => sum + parseInt(v.num_ventas), 0);
+        const totalCompras = datos.compras.reduce((sum, c) => sum + parseFloat(c.total_compras), 0);
+        const stockBajoCount = datos.stock_bajo.length;
+
+        document.getElementById('tarjetas-resumen').innerHTML = `
+            <div class="col-md-3">
+                <div class="card card-stats text-center">
+                    <h3 class="fw-bold text-primary">$${totalVentas.toLocaleString('es-MX', {minimumFractionDigits: 2})}</h3>
+                    <p class="text-muted">Ventas totales</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card card-stats text-center">
+                    <h3 class="fw-bold text-success">${numVentas}</h3>
+                    <p class="text-muted">Transacciones</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card card-stats text-center">
+                    <h3 class="fw-bold text-info">$${totalCompras.toLocaleString('es-MX', {minimumFractionDigits: 2})}</h3>
+                    <p class="text-muted">Compras totales</p>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card card-stats text-center">
+                    <h3 class="fw-bold text-danger">${stockBajoCount}</h3>
+                    <p class="text-muted">Productos con stock bajo</p>
+                </div>
+            </div>
+        `;
+
+        // Gráfico de ventas
+        if (graficoVentas) graficoVentas.destroy();
+        const ctx = document.getElementById('graficoVentas').getContext('2d');
+        graficoVentas = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: datos.ventas.map(v => v.periodo),
+                datasets: [{
+                    label: 'Ventas ($)',
+                    data: datos.ventas.map(v => v.total_ventas),
+                    borderColor: '#3498db',
+                    backgroundColor: 'rgba(52,152,219,0.1)',
+                    fill: true,
+                    tension: 0.3
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false }
+                }
+            }
+        });
+
+        // Top 10 piezas
+        let topHtml = '';
+        datos.top_piezas.forEach((p, i) => {
+            topHtml += `
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <span><strong>#${i+1}</strong> ${p.nombre_interno}</span>
+                    <span class="badge bg-primary rounded-pill">${p.total_vendido} uds.</span>
+                </div>
+            `;
+        });
+        document.getElementById('top-piezas').innerHTML = topHtml || '<p class="text-muted">Sin ventas en este período</p>';
+
+        // Alertas de stock bajo
+        let stockHtml = '';
+        datos.stock_bajo.forEach(item => {
+            stockHtml += `
+                <div class="col-md-6 col-lg-4 mb-2">
+                    <div class="alert alert-warning mb-0">
+                        <strong>${item.nombre_interno}</strong><br>
+                        <small>Stock: ${item.stock_actual}/${item.stock_minimo}</small><br>
+                        <small class="text-muted">Códigos: ${item.codigos || 'N/A'}</small>
+                    </div>
+                </div>
+            `;
+        });
+        document.getElementById('alertas-stock').innerHTML = stockHtml || '<p class="text-muted">Todos los productos tienen stock suficiente ✅</p>';
+
+    } catch (error) {
+        console.error('Error al cargar dashboard:', error);
+    }
+}
+
+// Cargar al inicio
+cargarDashboard();
+</script>
+{% endblock %}
