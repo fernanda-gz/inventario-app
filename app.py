@@ -39,7 +39,6 @@ def get_db():
 @app.route('/')
 def dashboard():
     conn = get_db()
-    # Obtener proveedores para filtro
     proveedores = []
     try:
         cur = conn.cursor()
@@ -191,7 +190,7 @@ def editar_proveedor(id):
     cur.execute("""
         UPDATE proveedores SET nombre=%s, contacto=%s, telefono=%s, email=%s, activo=%s
         WHERE id=%s
-    """, (data['nombre'], data.get('contacto', ''), data.get('telefono', ''),
+    """, (data.get('nombre', ''), data.get('contacto', ''), data.get('telefono', ''),
           data.get('email', ''), data.get('activo', True), id))
     conn.commit()
     conn.close()
@@ -239,9 +238,9 @@ def editar_pieza(id):
         UPDATE piezas SET nombre_interno=%s, descripcion=%s, stock_actual=%s,
                stock_minimo=%s, ubicacion=%s, activo=%s
         WHERE id=%s
-    """, (data['nombre_interno'], data.get('descripcion', ''),
-          data['stock_actual'], data['stock_minimo'], data.get('ubicacion', ''),
-          data.get('activo', True), id))
+    """, (data.get('nombre_interno', ''), data.get('descripcion', ''),
+          data.get('stock_actual', 0), data.get('stock_minimo', 5),
+          data.get('ubicacion', ''), data.get('activo', True), id))
     conn.commit()
     conn.close()
     return jsonify({'success': True})
@@ -262,7 +261,6 @@ def equivalencias():
         ORDER BY p.nombre_interno, pr.nombre
     """)
     equivalencias = cur.fetchall()
-    # Para los select
     cur.execute("SELECT id, nombre_interno FROM piezas WHERE activo=true ORDER BY nombre_interno")
     piezas = cur.fetchall()
     cur.execute("SELECT id, nombre FROM proveedores WHERE activo=true ORDER BY nombre")
@@ -293,7 +291,7 @@ def compras():
     if request.method == 'POST':
         data = request.form
         cur = conn.cursor()
-        # Buscar la equivalencia o crear si no existe (simplificado)
+        # Buscar la equivalencia o crear si no existe
         cur.execute("SELECT id FROM equivalencias_proveedor WHERE pieza_id=%s AND proveedor_id=%s",
                     (data['pieza_id'], data['proveedor_id']))
         eq = cur.fetchone()
@@ -312,7 +310,7 @@ def compras():
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (data['fecha'], data['proveedor_id'], eq_id, data['cantidad'],
               data['precio_unitario'], total, data.get('numero_factura', '')))
-        # Actualizar stock
+        # Actualizar stock (sumar)
         cur.execute("UPDATE piezas SET stock_actual = stock_actual + %s WHERE id = %s",
                     (data['cantidad'], data['pieza_id']))
         conn.commit()
@@ -335,7 +333,7 @@ def compras():
     cur.execute("SELECT id, nombre FROM proveedores WHERE activo=true ORDER BY nombre")
     proveedores = cur.fetchall()
     conn.close()
-    return render_template('compras.html', compras=lista_compras, piezas=piezas, proveedores=proveedores)
+    return render_template('compras.html', compras=lista_compras, piezas=piezas, proveedores=proveedores, hoy=datetime.now().strftime('%Y-%m-%d'))
 
 # ------------------------------------------------------------
 # Registro de Ventas
@@ -374,7 +372,7 @@ def ventas():
     return render_template('ventas.html', ventas=lista_ventas, piezas=piezas)
 
 # ------------------------------------------------------------
-# Reportes avanzados (opcional, base para exportar)
+# Reportes (base para futuras funcionalidades)
 # ------------------------------------------------------------
 @app.route('/reportes')
 def reportes():
