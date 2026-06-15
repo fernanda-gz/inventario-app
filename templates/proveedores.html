@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="fw-bold"><i class="fas fa-truck me-2"></i>Proveedores</h2>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalProveedor" onclick="limpiarFormulario()">
+            <i class="fas fa-plus me-1"></i> Nuevo Proveedor
+        </button>
+    </div>
+
+    <!-- Tabla de proveedores -->
+    <div class="card card-stats">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Nombre</th>
+                            <th>Contacto</th>
+                            <th>Teléfono</th>
+                            <th>Email</th>
+                            <th>Estado</th>
+                            <th class="text-end">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in proveedores %}
+                        <tr>
+                            <td class="fw-semibold">{{ p.nombre }}</td>
+                            <td>{{ p.contacto or '-' }}</td>
+                            <td>{{ p.telefono or '-' }}</td>
+                            <td>{{ p.email or '-' }}</td>
+                            <td>
+                                <span class="badge {% if p.activo %}bg-success{% else %}bg-secondary{% endif %}">
+                                    {{ 'Activo' if p.activo else 'Inactivo' }}
+                                </span>
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-primary me-1" 
+                                        onclick="editarProveedor({{ p.id }}, '{{ p.nombre }}', '{{ p.contacto or '' }}', '{{ p.telefono or '' }}', '{{ p.email or '' }}', {{ p.activo|lower }})">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="toggleProveedor({{ p.id }}, {{ p.activo|lower }})">
+                                    <i class="fas fa-power-off"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para agregar/editar proveedor -->
+<div class="modal fade" id="modalProveedor" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="modalTitulo">Nuevo Proveedor</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formProveedor">
+                    <input type="hidden" id="proveedor_id">
+                    <div class="mb-3">
+                        <label class="form-label">Nombre *</label>
+                        <input type="text" id="nombre" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Contacto</label>
+                        <input type="text" id="contacto" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Teléfono</label>
+                        <input type="text" id="telefono" class="form-control">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Email</label>
+                        <input type="email" id="email" class="form-control">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="guardarProveedor()">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function limpiarFormulario() {
+    document.getElementById('proveedor_id').value = '';
+    document.getElementById('nombre').value = '';
+    document.getElementById('contacto').value = '';
+    document.getElementById('telefono').value = '';
+    document.getElementById('email').value = '';
+    document.getElementById('modalTitulo').textContent = 'Nuevo Proveedor';
+}
+
+function editarProveedor(id, nombre, contacto, telefono, email, activo) {
+    document.getElementById('proveedor_id').value = id;
+    document.getElementById('nombre').value = nombre;
+    document.getElementById('contacto').value = contacto;
+    document.getElementById('telefono').value = telefono;
+    document.getElementById('email').value = email;
+    document.getElementById('modalTitulo').textContent = 'Editar Proveedor';
+    new bootstrap.Modal(document.getElementById('modalProveedor')).show();
+}
+
+async function guardarProveedor() {
+    const id = document.getElementById('proveedor_id').value;
+    const data = {
+        nombre: document.getElementById('nombre').value,
+        contacto: document.getElementById('contacto').value,
+        telefono: document.getElementById('telefono').value,
+        email: document.getElementById('email').value
+    };
+
+    if (!data.nombre) {
+        alert('El nombre es obligatorio');
+        return;
+    }
+
+    const url = id ? `/api/proveedores/${id}` : '/api/proveedores';
+    const method = id ? 'PUT' : 'POST';
+
+    try {
+        const response = await fetch(url, {
+            method: method,
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Error al guardar');
+        }
+    } catch (error) {
+        console.error(error);
+    }
+}
+
+async function toggleProveedor(id, activo) {
+    if (!confirm(`¿${activo ? 'Desactivar' : 'Activar'} este proveedor?`)) return;
+    try {
+        const response = await fetch(`/api/proveedores/${id}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({activo: !activo})
+        });
+        if (response.ok) location.reload();
+    } catch (error) {
+        console.error(error);
+    }
+}
+</script>
+{% endblock %}
