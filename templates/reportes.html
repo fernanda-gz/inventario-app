@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="fw-bold"><i class="fas fa-chart-bar me-2"></i>Reportes</h2>
+    </div>
+
+    <!-- Filtros -->
+    <div class="card card-stats mb-4">
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Fecha Inicio</label>
+                    <input type="date" id="fecha_inicio" class="form-control">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Fecha Fin</label>
+                    <input type="date" id="fecha_fin" class="form-control">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label fw-semibold">Agrupar por</label>
+                    <select id="agrupar_por" class="form-select">
+                        <option value="dia">Día</option>
+                        <option value="mes" selected>Mes</option>
+                        <option value="año">Año</option>
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-primary w-100" onclick="cargarReportes()">
+                        <i class="fas fa-filter me-1"></i> Aplicar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tarjetas de resumen -->
+    <div class="row mb-4" id="tarjetas-resumen"></div>
+
+    <!-- Gráficos -->
+    <div class="row mb-4">
+        <div class="col-lg-8">
+            <div class="card card-stats">
+                <div class="card-body">
+                    <h5 class="fw-bold mb-3">Ventas por Producto (Top 10)</h5>
+                    <canvas id="graficoProductos" height="120"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card card-stats">
+                <div class="card-body">
+                    <h5 class="fw-bold mb-3">Compras por Proveedor</h5>
+                    <canvas id="graficoProveedores" height="200"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Tablas detalladas -->
+    <div class="row">
+        <div class="col-md-6 mb-4">
+            <div class="card card-stats">
+                <div class="card-body">
+                    <h5 class="fw-bold mb-3">Ventas por Producto (Detalle)</h5>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover" id="tablaProductos">
+                            <thead class="table-light">
+                                <tr><th>Producto</th><th>Cantidad</th><th>Total</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6 mb-4">
+            <div class="card card-stats">
+                <div class="card-body">
+                    <h5 class="fw-bold mb-3">Compras por Proveedor (Detalle)</h5>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover" id="tablaProveedores">
+                            <thead class="table-light">
+                                <tr><th>Proveedor</th><th>Compras</th><th>Total</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Fechas por defecto: últimos 6 meses
+const hoy = new Date();
+const hace6meses = new Date();
+hace6meses.setMonth(hoy.getMonth() - 6);
+
+document.getElementById('fecha_inicio').value = hace6meses.toISOString().split('T')[0];
+document.getElementById('fecha_fin').value = hoy.toISOString().split('T')[0];
+
+let graficoProductos = null, graficoProveedores = null;
+
+async function cargarReportes() {
+    const params = new URLSearchParams({
+        fecha_inicio: document.getElementById('fecha_inicio').value,
+        fecha_fin: document.getElementById('fecha_fin').value,
+        agrupar_por: document.getElementById('agrupar_por').value
+    });
+
+    try {
+        const response = await fetch(`/api/dashboard/datos?${params}`);
+        const datos = await response.json();
+
+        // Resumen
+        const totalVentas = datos.ventas.reduce((s, v) => s + parseFloat(v.total_ventas), 0);
+        const totalCompras = datos.compras.reduce((s, c) => s + parseFloat(c.total_compras), 0);
+        document.getElementById('tarjetas-resumen').innerHTML = `
+            <div class="col-md-4">
+                <div class="card card-stats text-center">
+                    <h3 class="fw-bold text-primary">$${totalVentas.toLocaleString('es-MX', {minimumFractionDigits: 2})}</h3>
+                    <p class="text-muted">Ventas totales</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card card-stats text-center">
+                    <h3 class="fw-bold text-info">$${totalCompras.toLocaleString('es-MX', {minimumFractionDigits: 2})}</h3>
+                    <p class="text-muted">Compras totales</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card card-stats text-center">
+                    <h3 class="fw-bold text-success">${datos.stock_bajo.length}</h3>
+                    <p class="text-muted">Productos bajo stock mínimo</p>
+                </div>
+            </div>
+        `;
+
+        // Gráfico de productos (top 10)
+        const labelsProd = datos.top_piezas.map(p => p.nombre_interno);
+        const cantidadesProd = datos.top_piezas.map(p => p.total_vendido);
+
+        if (graficoProductos) graficoProductos.destroy();
+        const ctxProd = document.getElementById('graficoProductos').getContext('2d');
+        graficoProductos = new Chart(ctxProd, {
+            type: 'bar',
+            data: {
+                labels: labelsProd,
+                datasets: [{
+                    label: 'Unidades vendidas',
+                    data: cantidadesProd,
+                    backgroundColor: '#3498db'
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } }
+            }
+        });
+
+        // Llenar tabla productos
+        let filasProd = '';
+        datos.top_piezas.forEach(p => {
+            filasProd += `<tr><td>${p.nombre_interno}</td><td>${p.total_vendido}</td><td>$${parseFloat(p.ingresos).toFixed(2)}</td></tr>`;
+        });
+        document.querySelector('#tablaProductos tbody').innerHTML = filasProd;
+
+        // Gráfico de proveedores
+        const labelsProv = datos.compras.map(c => c.proveedor);
+        const totalesProv = datos.compras.map(c => c.total_compras);
+
+        if (graficoProveedores) graficoProveedores.destroy();
+        const ctxProv = document.getElementById('graficoProveedores').getContext('2d');
+        graficoProveedores = new Chart(ctxProv, {
+            type: 'doughnut',
+            data: {
+                labels: labelsProv,
+                datasets: [{
+                    data: totalesProv,
+                    backgroundColor: ['#3498db', '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6', '#1abc9c']
+                }]
+            }
+        });
+
+        // Llenar tabla proveedores
+        let filasProv = '';
+        datos.compras.forEach(c => {
+            filasProv += `<tr><td>${c.proveedor}</td><td>${c.num_compras}</td><td>$${parseFloat(c.total_compras).toFixed(2)}</td></tr>`;
+        });
+        document.querySelector('#tablaProveedores tbody').innerHTML = filasProv;
+
+    } catch (error) {
+        console.error(error);
+    }
+}
+
+// Cargar al inicio
+cargarReportes();
+</script>
+{% endblock %}
