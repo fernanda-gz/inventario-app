@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for
 import os
 import psycopg2
 import psycopg2.extras
-import psycopg2.errors  # <-- Necesario para UniqueViolation
+import psycopg2.errors
 from urllib.parse import urlparse
 from datetime import datetime, timedelta
 
@@ -23,7 +23,6 @@ def get_db():
             port=result.port
         )
     else:
-        # Desarrollo local (opcional)
         conn = psycopg2.connect(
             database="inventario",
             user="postgres",
@@ -36,7 +35,6 @@ def get_db():
 
 # ------------------------------------------------------------
 # Función para calcular el stock mínimo sugerido
-# (doble del total vendido en los últimos 7 días, mínimo 5)
 # ------------------------------------------------------------
 def calcular_minimo_por_sku(sku):
     if not sku:
@@ -71,14 +69,14 @@ def dashboard():
     return render_template('dashboard.html', proveedores=proveedores)
 
 # ------------------------------------------------------------
-# API: Datos para el dashboard (filtros flexibles)
+# API: Datos para el dashboard
 # ------------------------------------------------------------
 @app.route('/api/dashboard/datos')
 def api_dashboard():
     fecha_inicio = request.args.get('fecha_inicio', (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'))
     fecha_fin = request.args.get('fecha_fin', datetime.now().strftime('%Y-%m-%d'))
     proveedor_id = request.args.get('proveedor_id', None)
-    agrupar_por = request.args.get('agrupar_por', 'dia')  # dia, mes, año
+    agrupar_por = request.args.get('agrupar_por', 'dia')
 
     if agrupar_por == 'mes':
         formato_fecha = "to_char(fecha, 'YYYY-MM')"
@@ -90,7 +88,6 @@ def api_dashboard():
     conn = get_db()
     cur = conn.cursor()
 
-    # Ventas en el período
     query_ventas = f"""
         SELECT {formato_fecha} as periodo,
                COUNT(*) as num_ventas,
@@ -103,7 +100,6 @@ def api_dashboard():
     cur.execute(query_ventas, (fecha_inicio, fecha_fin))
     ventas = cur.fetchall()
 
-    # Compras por proveedor
     query_compras = """
         SELECT p.nombre as proveedor,
                COUNT(c.id) as num_compras,
@@ -120,7 +116,6 @@ def api_dashboard():
     cur.execute(query_compras, params)
     compras = cur.fetchall()
 
-    # Stock bajo
     cur.execute("""
         SELECT p.nombre_interno, p.sku, p.stock_actual, p.stock_minimo,
                STRING_AGG(ep.codigo_proveedor, ', ') as codigos
@@ -132,7 +127,6 @@ def api_dashboard():
     """)
     stock_bajo = cur.fetchall()
 
-    # Top 10 piezas más vendidas
     cur.execute("""
         SELECT p.nombre_interno,
                SUM(v.cantidad) as total_vendido,
@@ -147,7 +141,6 @@ def api_dashboard():
     top_piezas = cur.fetchall()
 
     conn.close()
-
     return jsonify({
         'ventas': [dict(row) for row in ventas],
         'compras': [dict(row) for row in compras],
@@ -156,7 +149,7 @@ def api_dashboard():
     })
 
 # ------------------------------------------------------------
-# Buscar pieza por código o nombre (para búsqueda rápida)
+# Buscar pieza
 # ------------------------------------------------------------
 @app.route('/api/buscar_pieza')
 def buscar_pieza():
@@ -180,7 +173,7 @@ def buscar_pieza():
     return jsonify([dict(row) for row in resultados])
 
 # ------------------------------------------------------------
-# Gestión de Proveedores
+# Proveedores
 # ------------------------------------------------------------
 @app.route('/proveedores')
 def proveedores():
@@ -219,7 +212,7 @@ def editar_proveedor(id):
     return jsonify({'success': True})
 
 # ------------------------------------------------------------
-# Gestión de Piezas (con SKU y mínimo automático)
+# Piezas (con SKU y mínimo automático)
 # ------------------------------------------------------------
 @app.route('/piezas')
 def piezas():
@@ -245,7 +238,6 @@ def agregar_pieza():
     nombre = data['nombre_interno']
     stock_minimo = data.get('stock_minimo', 5)
 
-    # Si no se envió stock_minimo o es 0, calcular automáticamente
     if not stock_minimo or int(stock_minimo) == 0:
         stock_minimo = calcular_minimo_por_sku(sku)
 
@@ -274,7 +266,6 @@ def editar_pieza(id):
     nombre = data.get('nombre_interno', '')
     stock_minimo = data.get('stock_minimo', None)
 
-    # Si no se especifica mínimo o es 0, calcular
     if stock_minimo is None or int(stock_minimo) == 0:
         stock_minimo = calcular_minimo_por_sku(sku) if sku else 5
 
@@ -313,7 +304,7 @@ def stock_minimo_sugerido():
     return jsonify({'sugerido': sugerido})
 
 # ------------------------------------------------------------
-# Gestión de Equivalencias (pieza - proveedor - código)
+# Equivalencias
 # ------------------------------------------------------------
 @app.route('/equivalencias')
 def equivalencias():
@@ -350,7 +341,7 @@ def agregar_equivalencia():
     return jsonify({'success': True})
 
 # ------------------------------------------------------------
-# Registro de Compras
+# Compras
 # ------------------------------------------------------------
 @app.route('/compras', methods=['GET', 'POST'])
 def compras():
@@ -358,7 +349,6 @@ def compras():
     if request.method == 'POST':
         data = request.form
         cur = conn.cursor()
-        # Buscar la equivalencia o crear si no existe
         cur.execute("SELECT id FROM equivalencias_proveedor WHERE pieza_id=%s AND proveedor_id=%s",
                     (data['pieza_id'], data['proveedor_id']))
         eq = cur.fetchone()
@@ -377,7 +367,6 @@ def compras():
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (data['fecha'], data['proveedor_id'], eq_id, data['cantidad'],
               data['precio_unitario'], total, data.get('numero_factura', '')))
-        # Actualizar stock (sumar)
         cur.execute("UPDATE piezas SET stock_actual = stock_actual + %s WHERE id = %s",
                     (data['cantidad'], data['pieza_id']))
         conn.commit()
@@ -403,7 +392,7 @@ def compras():
     return render_template('compras.html', compras=lista_compras, piezas=piezas, proveedores=proveedores, hoy=datetime.now().strftime('%Y-%m-%d'))
 
 # ------------------------------------------------------------
-# Registro de Ventas
+# Ventas
 # ------------------------------------------------------------
 @app.route('/ventas', methods=['GET', 'POST'])
 def ventas():
@@ -417,7 +406,6 @@ def ventas():
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (data['fecha'], data['pieza_id'], data['cantidad'],
               data['precio_unitario'], total, data.get('cliente', ''), data.get('numero_factura', '')))
-        # Actualizar stock (restar)
         cur.execute("UPDATE piezas SET stock_actual = stock_actual - %s WHERE id = %s",
                     (data['cantidad'], data['pieza_id']))
         conn.commit()
@@ -433,7 +421,8 @@ def ventas():
         LIMIT 100
     """)
     lista_ventas = cur.fetchall()
-    cur.execute("SELECT id, nombre_interno, precio_venta FROM piezas WHERE activo=true ORDER BY nombre_interno")
+    # Ya no seleccionamos precio_venta, solo id y nombre_interno
+    cur.execute("SELECT id, nombre_interno FROM piezas WHERE activo=true ORDER BY nombre_interno")
     piezas = cur.fetchall()
     conn.close()
     return render_template('ventas.html', ventas=lista_ventas, piezas=piezas)
@@ -446,7 +435,7 @@ def reportes():
     return render_template('reportes.html')
 
 # ------------------------------------------------------------
-# Ruta para crear/actualizar tablas (agrega campo SKU si falta)
+# Crear/actualizar tablas (AGREGA COLUMNAS FALTANTES)
 # ------------------------------------------------------------
 @app.route('/crear-tablas')
 def crear_tablas():
@@ -507,15 +496,23 @@ def crear_tablas():
         CREATE INDEX IF NOT EXISTS idx_compras_fecha ON compras(fecha);
     """)
 
-    # Agregar columna sku si no existe
+    # Añadir columnas que puedan faltar en bases de datos ya creadas
     try:
         cur.execute("ALTER TABLE piezas ADD COLUMN sku VARCHAR(100) UNIQUE")
     except:
-        pass  # ya existe, ignorar error
+        pass
+    try:
+        cur.execute("ALTER TABLE piezas ADD COLUMN precio_venta DECIMAL(10,2)")
+    except:
+        pass
+    try:
+        cur.execute("ALTER TABLE compras ADD COLUMN equivalencia_id INTEGER REFERENCES equivalencias_proveedor(id)")
+    except:
+        pass
 
     conn.commit()
     conn.close()
-    return "✅ Tablas actualizadas. Campo SKU agregado si faltaba."
+    return "✅ Tablas y columnas actualizadas correctamente."
 
 if __name__ == '__main__':
     app.run(debug=True)
