@@ -15,6 +15,7 @@
                 <table class="table table-hover align-middle">
                     <thead class="table-light">
                         <tr>
+                            <th>SKU</th>
                             <th>Nombre Interno</th>
                             <th>Descripción</th>
                             <th>Stock Actual</th>
@@ -28,6 +29,7 @@
                     <tbody>
                         {% for p in piezas %}
                         <tr>
+                            <td><code>{{ p.sku or 'N/A' }}</code></td>
                             <td class="fw-semibold">{{ p.nombre_interno }}</td>
                             <td>{{ p.descripcion or '-' }}</td>
                             <td>
@@ -45,7 +47,7 @@
                             </td>
                             <td class="text-end">
                                 <button class="btn btn-sm btn-outline-primary me-1" 
-                                        onclick="editarPieza({{ p.id }}, '{{ p.nombre_interno }}', '{{ p.descripcion or '' }}', {{ p.stock_actual }}, {{ p.stock_minimo }}, '{{ p.ubicacion or '' }}', {{ p.activo|lower }})">
+                                        onclick="editarPieza({{ p.id }}, '{{ p.sku or '' }}', '{{ p.nombre_interno }}', '{{ p.descripcion or '' }}', {{ p.stock_actual }}, {{ p.stock_minimo }}, '{{ p.ubicacion or '' }}', {{ p.activo|lower }})">
                                     <i class="fas fa-edit"></i>
                                 </button>
                                 <button class="btn btn-sm btn-outline-danger" onclick="togglePieza({{ p.id }}, {{ p.activo|lower }})">
@@ -63,7 +65,7 @@
 
 <!-- Modal para agregar/editar pieza -->
 <div class="modal fade" id="modalPieza" tabindex="-1">
-    <div class="modal-dialog">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title" id="modalTitulo">Nueva Pieza</h5>
@@ -72,27 +74,42 @@
             <div class="modal-body">
                 <form id="formPieza">
                     <input type="hidden" id="pieza_id">
-                    <div class="mb-3">
-                        <label class="form-label">Nombre Interno *</label>
-                        <input type="text" id="nombre_interno" class="form-control" required>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">SKU *</label>
+                            <input type="text" id="sku" class="form-control" required>
+                            <small class="text-muted">Código único (ej: SDI3, DI3)</small>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Nombre Interno *</label>
+                            <input type="text" id="nombre_interno" class="form-control" required>
+                        </div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Descripción</label>
                         <textarea id="descripcion" class="form-control" rows="2"></textarea>
                     </div>
                     <div class="row">
-                        <div class="col-md-6 mb-3">
+                        <div class="col-md-4 mb-3">
                             <label class="form-label">Stock Actual</label>
                             <input type="number" id="stock_actual" class="form-control" value="0">
                         </div>
-                        <div class="col-md-6 mb-3">
+                        <div class="col-md-4 mb-3">
                             <label class="form-label">Stock Mínimo</label>
                             <input type="number" id="stock_minimo" class="form-control" value="5">
+                            <small class="text-muted">Se calculará automáticamente si no se especifica</small>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Ubicación</label>
+                            <input type="text" id="ubicacion" class="form-control">
                         </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Ubicación</label>
-                        <input type="text" id="ubicacion" class="form-control">
+                    <div class="alert alert-info">
+                        <i class="fas fa-calculator me-2"></i>
+                        <strong>Stock mínimo sugerido:</strong> <span id="minimo-calculado">-</span>
+                        <button type="button" class="btn btn-sm btn-outline-primary ms-3" onclick="calcularMinimo()">
+                            Calcular (doble de ventas 7 días)
+                        </button>
                     </div>
                 </form>
             </div>
@@ -107,16 +124,19 @@
 <script>
 function limpiarFormulario() {
     document.getElementById('pieza_id').value = '';
+    document.getElementById('sku').value = '';
     document.getElementById('nombre_interno').value = '';
     document.getElementById('descripcion').value = '';
     document.getElementById('stock_actual').value = '0';
     document.getElementById('stock_minimo').value = '5';
     document.getElementById('ubicacion').value = '';
+    document.getElementById('minimo-calculado').textContent = '-';
     document.getElementById('modalTitulo').textContent = 'Nueva Pieza';
 }
 
-function editarPieza(id, nombre, descripcion, stock, minimo, ubicacion, activo) {
+function editarPieza(id, sku, nombre, descripcion, stock, minimo, ubicacion, activo) {
     document.getElementById('pieza_id').value = id;
+    document.getElementById('sku').value = sku;
     document.getElementById('nombre_interno').value = nombre;
     document.getElementById('descripcion').value = descripcion;
     document.getElementById('stock_actual').value = stock;
@@ -126,9 +146,32 @@ function editarPieza(id, nombre, descripcion, stock, minimo, ubicacion, activo) 
     new bootstrap.Modal(document.getElementById('modalPieza')).show();
 }
 
+async function calcularMinimo() {
+    const sku = document.getElementById('sku').value;
+    if (!sku) {
+        alert('Primero ingrese el SKU de la pieza');
+        return;
+    }
+    try {
+        const response = await fetch(`/api/stock-minimo-sugerido?sku=${encodeURIComponent(sku)}`);
+        const data = await response.json();
+        if (data.sugerido !== undefined) {
+            document.getElementById('minimo-calculado').textContent = data.sugerido;
+            document.getElementById('stock_minimo').value = data.sugerido;
+        } else {
+            alert('No hay ventas recientes para calcular. Se usará 5 por defecto.');
+            document.getElementById('stock_minimo').value = 5;
+        }
+    } catch (error) {
+        console.error(error);
+        alert('Error al calcular. Revise la consola.');
+    }
+}
+
 async function guardarPieza() {
     const id = document.getElementById('pieza_id').value;
     const data = {
+        sku: document.getElementById('sku').value,
         nombre_interno: document.getElementById('nombre_interno').value,
         descripcion: document.getElementById('descripcion').value,
         stock_actual: parseInt(document.getElementById('stock_actual').value),
@@ -136,8 +179,8 @@ async function guardarPieza() {
         ubicacion: document.getElementById('ubicacion').value
     };
 
-    if (!data.nombre_interno) {
-        alert('El nombre interno es obligatorio');
+    if (!data.sku || !data.nombre_interno) {
+        alert('SKU y Nombre Interno son obligatorios');
         return;
     }
 
@@ -153,10 +196,12 @@ async function guardarPieza() {
         if (response.ok) {
             location.reload();
         } else {
-            alert('Error al guardar la pieza');
+            const err = await response.json();
+            alert('Error: ' + (err.error || 'Error al guardar'));
         }
     } catch (error) {
         console.error(error);
+        alert('Error de conexión');
     }
 }
 

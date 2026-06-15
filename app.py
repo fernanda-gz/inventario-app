@@ -34,6 +34,26 @@ def get_db():
     return conn
 
 # ------------------------------------------------------------
+# Función para calcular el stock mínimo sugerido
+# (doble del total vendido en los últimos 7 días, mínimo 5)
+# ------------------------------------------------------------
+def calcular_minimo_por_sku(sku):
+    if not sku:
+        return 5
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT COALESCE(SUM(v.cantidad), 0) as total_vendido
+        FROM ventas v
+        JOIN piezas p ON v.pieza_id = p.id
+        WHERE p.sku = %s AND v.fecha >= NOW() - INTERVAL '7 days'
+    """, (sku,))
+    result = cur.fetchone()
+    conn.close()
+    total = result['total_vendido'] if result else 0
+    return max(total * 2, 5)
+
+# ------------------------------------------------------------
 # Ruta principal - Dashboard
 # ------------------------------------------------------------
 @app.route('/')
@@ -101,7 +121,7 @@ def api_dashboard():
 
     # Stock bajo
     cur.execute("""
-        SELECT p.nombre_interno, p.stock_actual, p.stock_minimo,
+        SELECT p.nombre_interno, p.sku, p.stock_actual, p.stock_minimo,
                STRING_AGG(ep.codigo_proveedor, ', ') as codigos
         FROM piezas p
         LEFT JOIN equivalencias_proveedor ep ON p.id = ep.pieza_id
@@ -143,16 +163,17 @@ def buscar_pieza():
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
-        SELECT DISTINCT p.id, p.nombre_interno, p.stock_actual,
+        SELECT DISTINCT p.id, p.sku, p.nombre_interno, p.stock_actual,
                ep.codigo_proveedor, ep.nombre_proveedor, pr.nombre as proveedor
         FROM piezas p
         LEFT JOIN equivalencias_proveedor ep ON p.id = ep.pieza_id
         LEFT JOIN proveedores pr ON ep.proveedor_id = pr.id
         WHERE p.nombre_interno ILIKE %s
+           OR p.sku ILIKE %s
            OR ep.codigo_proveedor ILIKE %s
            OR ep.nombre_proveedor ILIKE %s
         LIMIT 20
-    """, (f'%{q}%', f'%{q}%', f'%{q}%'))
+    """, (f'%{q}%', f'%{q}%', f'%{q}%', f'%{q}%'))
     resultados = cur.fetchall()
     conn.close()
     return jsonify([dict(row) for row in resultados])
@@ -197,14 +218,15 @@ def editar_proveedor(id):
     return jsonify({'success': True})
 
 # ------------------------------------------------------------
-# Gestión de Piezas
+# Gestión de Piezas (con SKU y mínimo automático)
 # ------------------------------------------------------------
 @app.route('/piezas')
 def piezas():
     conn = get_db()
     cur = conn.cursor()
     cur.execute("""
-        SELECT p.*, 
+        SELECT p.id, p.sku, p.nombre_interno, p.descripcion, p.stock_actual, p.stock_minimo,
+               p.ubicacion, p.activo, p.fecha_creacion,
                COALESCE(SUM(v.cantidad), 0) as total_vendido
         FROM piezas p
         LEFT JOIN ventas v ON p.id = v.pieza_id
@@ -218,32 +240,76 @@ def piezas():
 @app.route('/api/piezas', methods=['POST'])
 def agregar_pieza():
     data = request.json
+    sku = data.get('sku', '').strip()
+    nombre = data['nombre_interno']
+    stock_minimo = data.get('stock_minimo', 5)
+
+    # Si no se envió stock_minimo o es 0, calcular automáticamente
+    if not stock_minimo or int(stock_minimo) == 0:
+        stock_minimo = calcular_minimo_por_sku(sku)
+
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO piezas (nombre_interno, descripcion, stock_actual, stock_minimo, ubicacion)
-        VALUES (%s, %s, %s, %s, %s)
-    """, (data['nombre_interno'], data.get('descripcion', ''),
-          data.get('stock_actual', 0), data.get('stock_minimo', 5), data.get('ubicacion', '')))
-    conn.commit()
-    conn.close()
-    return jsonify({'success': True})
+    try:
+        cur.execute("""
+            INSERT INTO piezas (sku, nombre_interno, descripcion, stock_actual, stock_minimo, ubicacion)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (sku, nombre, data.get('descripcion', ''),
+              data.get('stock_actual', 0), stock_minimo, data.get('ubicacion', '')))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except psycopg2.IntegrityError:
+        conn.close()
+        return jsonify({'error': 'El SKU ya existe. Use un código único.'}), 400
 
 @app.route('/api/piezas/<int:id>', methods=['PUT'])
 def editar_pieza(id):
     data = request.json
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("""
-        UPDATE piezas SET nombre_interno=%s, descripcion=%s, stock_actual=%s,
-               stock_minimo=%s, ubicacion=%s, activo=%s
-        WHERE id=%s
-    """, (data.get('nombre_interno', ''), data.get('descripcion', ''),
-          data.get('stock_actual', 0), data.get('stock_minimo', 5),
-          data.get('ubicacion', ''), data.get('activo', True), id))
-    conn.commit()
-    conn.close()
-    return jsonify({'success': True})
+
+    sku = data.get('sku', None)
+    nombre = data.get('nombre_interno', '')
+    stock_minimo = data.get('stock_minimo', None)
+
+    # Si no se especifica mínimo o es 0, calcular
+    if stock_minimo is None or int(stock_minimo) == 0:
+        stock_minimo = calcular_minimo_por_sku(sku) if sku else 5
+
+    try:
+        cur.execute("""
+            UPDATE piezas SET 
+                nombre_interno = %s,
+                sku = COALESCE(%s, sku),
+                descripcion = %s,
+                stock_actual = %s,
+                stock_minimo = %s,
+                ubicacion = %s,
+                activo = %s
+            WHERE id = %s
+        """, (
+            nombre,
+            sku,
+            data.get('descripcion', ''),
+            data.get('stock_actual', 0),
+            stock_minimo,
+            data.get('ubicacion', ''),
+            data.get('activo', True),
+            id
+        ))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True})
+    except psycopg2.IntegrityError:
+        conn.close()
+        return jsonify({'error': 'El SKU ya existe. Use un código único.'}), 400
+
+@app.route('/api/stock-minimo-sugerido')
+def stock_minimo_sugerido():
+    sku = request.args.get('sku', '')
+    sugerido = calcular_minimo_por_sku(sku)
+    return jsonify({'sugerido': sugerido})
 
 # ------------------------------------------------------------
 # Gestión de Equivalencias (pieza - proveedor - código)
@@ -372,19 +438,20 @@ def ventas():
     return render_template('ventas.html', ventas=lista_ventas, piezas=piezas)
 
 # ------------------------------------------------------------
-# Reportes (base para futuras funcionalidades)
+# Reportes
 # ------------------------------------------------------------
 @app.route('/reportes')
 def reportes():
     return render_template('reportes.html')
 
 # ------------------------------------------------------------
-# Ruta para crear las tablas (usar solo una vez)
+# Ruta para crear/actualizar tablas (agrega campo SKU si falta)
 # ------------------------------------------------------------
 @app.route('/crear-tablas')
 def crear_tablas():
     conn = get_db()
     cur = conn.cursor()
+
     cur.execute("""
         CREATE TABLE IF NOT EXISTS proveedores (
             id SERIAL PRIMARY KEY,
@@ -398,6 +465,7 @@ def crear_tablas():
         CREATE TABLE IF NOT EXISTS piezas (
             id SERIAL PRIMARY KEY,
             nombre_interno VARCHAR(200) NOT NULL,
+            sku VARCHAR(100) UNIQUE,
             descripcion TEXT,
             stock_actual INTEGER DEFAULT 0,
             stock_minimo INTEGER DEFAULT 5,
@@ -437,9 +505,16 @@ def crear_tablas():
         CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas(fecha);
         CREATE INDEX IF NOT EXISTS idx_compras_fecha ON compras(fecha);
     """)
+
+    # Agregar columna sku si no existe
+    try:
+        cur.execute("ALTER TABLE piezas ADD COLUMN sku VARCHAR(100) UNIQUE")
+    except:
+        pass  # ya existe, ignorar error
+
     conn.commit()
     conn.close()
-    return "✅ Tablas creadas exitosamente"
+    return "✅ Tablas actualizadas. Campo SKU agregado si faltaba."
 
 if __name__ == '__main__':
     app.run(debug=True)
