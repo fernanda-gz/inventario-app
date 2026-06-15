@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="fw-bold"><i class="fas fa-cogs me-2"></i>Piezas</h2>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalPieza" onclick="limpiarFormulario()">
+            <i class="fas fa-plus me-1"></i> Nueva Pieza
+        </button>
+    </div>
+
+    <!-- Tabla de piezas -->
+    <div class="card card-stats">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Nombre Interno</th>
+                            <th>Descripción</th>
+                            <th>Stock Actual</th>
+                            <th>Stock Mínimo</th>
+                            <th>Ubicación</th>
+                            <th>Total Vendido</th>
+                            <th>Estado</th>
+                            <th class="text-end">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in piezas %}
+                        <tr>
+                            <td class="fw-semibold">{{ p.nombre_interno }}</td>
+                            <td>{{ p.descripcion or '-' }}</td>
+                            <td>
+                                <span class="badge {% if p.stock_actual <= p.stock_minimo %}bg-danger{% else %}bg-success{% endif %} fs-6">
+                                    {{ p.stock_actual }}
+                                </span>
+                            </td>
+                            <td>{{ p.stock_minimo }}</td>
+                            <td>{{ p.ubicacion or '-' }}</td>
+                            <td>{{ p.total_vendido }}</td>
+                            <td>
+                                <span class="badge {% if p.activo %}bg-success{% else %}bg-secondary{% endif %}">
+                                    {{ 'Activo' if p.activo else 'Inactivo' }}
+                                </span>
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-primary me-1" 
+                                        onclick="editarPieza({{ p.id }}, '{{ p.nombre_interno }}', '{{ p.descripcion or '' }}', {{ p.stock_actual }}, {{ p.stock_minimo }}, '{{ p.ubicacion or '' }}', {{ p.activo|lower }})">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" onclick="togglePieza({{ p.id }}, {{ p.activo|lower }})">
+                                    <i class="fas fa-power-off"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para agregar/editar pieza -->
+<div class="modal fade" id="modalPieza" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="modalTitulo">Nueva Pieza</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="formPieza">
+                    <input type="hidden" id="pieza_id">
+                    <div class="mb-3">
+                        <label class="form-label">Nombre Interno *</label>
+                        <input type="text" id="nombre_interno" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Descripción</label>
+                        <textarea id="descripcion" class="form-control" rows="2"></textarea>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Stock Actual</label>
+                            <input type="number" id="stock_actual" class="form-control" value="0">
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Stock Mínimo</label>
+                            <input type="number" id="stock_minimo" class="form-control" value="5">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Ubicación</label>
+                        <input type="text" id="ubicacion" class="form-control">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" onclick="guardarPieza()">Guardar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function limpiarFormulario() {
+    document.getElementById('pieza_id').value = '';
+    document.getElementById('nombre_interno').value = '';
+    document.getElementById('descripcion').value = '';
+    document.getElementById('stock_actual').value = '0';
+    document.getElementById('stock_minimo').value = '5';
+    document.getElementById('ubicacion').value = '';
+    document.getElementById('modalTitulo').textContent = 'Nueva Pieza';
+}
+
+function editarPieza(id, nombre, descripcion, stock, minimo, ubicacion, activo) {
+    document.getElementById('pieza_id').value = id;
+    document.getElementById('nombre_interno').value = nombre;
+    document.getElementById('descripcion').value = descripcion;
+    document.getElementById('stock_actual').value = stock;
+    document.getElementById('stock_minimo').value = minimo;
+    document.getElementById('ubicacion').value = ubicacion;
+    document.getElementById('modalTitulo').textContent = 'Editar Pieza';
+    new bootstrap.Modal(document.getElementById('modalPieza')).show();
+}
+
+async function guardarPieza() {
+    const id = document.getElementById('pieza_id').value;
+    const data = {
+        nombre_interno: document.getElementById('nombre_interno').value,
+        descripcion: document.getElementById('descripcion').value,
+        stock_actual: parseInt(document.getElementById('stock_actual').value),
+        stock_minimo: parseInt(document.getElementById('stock_minimo').value),
+        ubicacion: document.getElementById('ubicacion').value
+    };
+
+    if (!data.nombre_interno) {
+        alert('El nombre interno es obligatorio');
+        return;
+    }
+
+    const url = id ? `/api/piezas/${id}` : '/api/piezas';
+    const method = id ? 'PUT' : 'POST';
+
+    try {
+        const response = await fetch(url, {
+            method: method,
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        if (response.ok) {
+            location.reload();
+        } else {
+            alert('Error al guardar la pieza');
+        }
+    } catch (error) {
+        console.error(error);
+    }
+}
+
+async function togglePieza(id, activo) {
+    if (!confirm(`¿${activo ? 'Desactivar' : 'Activar'} esta pieza?`)) return;
+    try {
+        const response = await fetch(`/api/piezas/${id}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({activo: !activo})
+        });
+        if (response.ok) location.reload();
+    } catch (error) {
+        console.error(error);
+    }
+}
+</script>
+{% endblock %}
