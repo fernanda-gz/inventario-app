@@ -19,7 +19,7 @@
                             <select name="pieza_id" id="pieza_id" class="form-select" required>
                                 <option value="">Seleccionar...</option>
                                 {% for p in piezas %}
-                                <option value="{{ p.id }}" data-precio="{{ p.precio_venta or 0 }}">
+                                <option value="{{ p.id }}">
                                     {{ p.nombre_interno }} (Stock: {{ p.stock_actual }})
                                 </option>
                                 {% endfor %}
@@ -97,16 +97,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     const hoy = new Date().toISOString().split('T')[0];
     document.querySelector('input[name="fecha"]').value = hoy;
-});
-
-// Autocompletar precio de venta al seleccionar pieza
-document.getElementById('pieza_id').addEventListener('change', function() {
-    const selected = this.options[this.selectedIndex];
-    const precio = selected.getAttribute('data-precio');
-    if (precio && parseFloat(precio) > 0) {
-        document.getElementById('precio_unitario').value = parseFloat(precio).toFixed(2);
-    }
-    calcularTotal();
+    calcularTotal(); // inicializar por si hay valores precargados
 });
 
 // Calcular total automáticamente
