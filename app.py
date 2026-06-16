@@ -23,7 +23,6 @@ def get_db():
             port=result.port
         )
     else:
-        # Desarrollo local (opcional)
         conn = psycopg2.connect(
             database="inventario",
             user="postgres",
@@ -36,7 +35,6 @@ def get_db():
 
 # ------------------------------------------------------------
 # Función para calcular el stock mínimo sugerido
-# (doble del total vendido en los últimos 7 días, mínimo 5)
 # ------------------------------------------------------------
 def calcular_minimo_por_sku(sku):
     if not sku:
@@ -71,14 +69,14 @@ def dashboard():
     return render_template('dashboard.html', proveedores=proveedores)
 
 # ------------------------------------------------------------
-# API: Datos para el dashboard (filtros flexibles)
+# API: Datos para el dashboard
 # ------------------------------------------------------------
 @app.route('/api/dashboard/datos')
 def api_dashboard():
     fecha_inicio = request.args.get('fecha_inicio', (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'))
     fecha_fin = request.args.get('fecha_fin', datetime.now().strftime('%Y-%m-%d'))
     proveedor_id = request.args.get('proveedor_id', None)
-    agrupar_por = request.args.get('agrupar_por', 'dia')  # dia, mes, año
+    agrupar_por = request.args.get('agrupar_por', 'dia')
 
     if agrupar_por == 'mes':
         formato_fecha = "to_char(fecha, 'YYYY-MM')"
@@ -90,7 +88,6 @@ def api_dashboard():
     conn = get_db()
     cur = conn.cursor()
 
-    # Ventas en el período
     query_ventas = f"""
         SELECT {formato_fecha} as periodo,
                COUNT(*) as num_ventas,
@@ -103,7 +100,6 @@ def api_dashboard():
     cur.execute(query_ventas, (fecha_inicio, fecha_fin))
     ventas = cur.fetchall()
 
-    # Compras por proveedor
     query_compras = """
         SELECT p.nombre as proveedor,
                COUNT(c.id) as num_compras,
@@ -120,7 +116,6 @@ def api_dashboard():
     cur.execute(query_compras, params)
     compras = cur.fetchall()
 
-    # Stock bajo
     cur.execute("""
         SELECT p.nombre_interno, p.sku, p.stock_actual, p.stock_minimo,
                STRING_AGG(ep.codigo_proveedor, ', ') as codigos
@@ -132,7 +127,6 @@ def api_dashboard():
     """)
     stock_bajo = cur.fetchall()
 
-    # Top 10 piezas más vendidas
     cur.execute("""
         SELECT p.nombre_interno,
                SUM(v.cantidad) as total_vendido,
@@ -147,7 +141,6 @@ def api_dashboard():
     top_piezas = cur.fetchall()
 
     conn.close()
-
     return jsonify({
         'ventas': [dict(row) for row in ventas],
         'compras': [dict(row) for row in compras],
@@ -156,7 +149,7 @@ def api_dashboard():
     })
 
 # ------------------------------------------------------------
-# Buscar pieza por código o nombre
+# Buscar pieza
 # ------------------------------------------------------------
 @app.route('/api/buscar_pieza')
 def buscar_pieza():
@@ -180,7 +173,7 @@ def buscar_pieza():
     return jsonify([dict(row) for row in resultados])
 
 # ------------------------------------------------------------
-# Gestión de Proveedores
+# Proveedores
 # ------------------------------------------------------------
 @app.route('/proveedores')
 def proveedores():
@@ -219,7 +212,7 @@ def editar_proveedor(id):
     return jsonify({'success': True})
 
 # ------------------------------------------------------------
-# Gestión de Piezas (con SKU y mínimo automático)
+# Piezas (con SKU y mínimo automático)
 # ------------------------------------------------------------
 @app.route('/piezas')
 def piezas():
@@ -311,7 +304,7 @@ def stock_minimo_sugerido():
     return jsonify({'sugerido': sugerido})
 
 # ------------------------------------------------------------
-# Gestión de Equivalencias
+# Equivalencias
 # ------------------------------------------------------------
 @app.route('/equivalencias')
 def equivalencias():
@@ -348,7 +341,7 @@ def agregar_equivalencia():
     return jsonify({'success': True})
 
 # ------------------------------------------------------------
-# Registro de Compras
+# Compras
 # ------------------------------------------------------------
 @app.route('/compras', methods=['GET', 'POST'])
 def compras():
@@ -399,7 +392,7 @@ def compras():
     return render_template('compras.html', compras=lista_compras, piezas=piezas, proveedores=proveedores, hoy=datetime.now().strftime('%Y-%m-%d'))
 
 # ------------------------------------------------------------
-# Registro de Ventas
+# Ventas
 # ------------------------------------------------------------
 @app.route('/ventas', methods=['GET', 'POST'])
 def ventas():
@@ -441,7 +434,7 @@ def reportes():
     return render_template('reportes.html')
 
 # ------------------------------------------------------------
-# Crear/actualizar tablas (AGREGA COLUMNAS FALTANTES)
+# Ruta MÁGICA: agrega TODAS las columnas faltantes
 # ------------------------------------------------------------
 @app.route('/crear-tablas')
 def crear_tablas():
@@ -502,24 +495,25 @@ def crear_tablas():
         CREATE INDEX IF NOT EXISTS idx_compras_fecha ON compras(fecha);
     """)
 
-    # Agregar columnas que pueden faltar en bases de datos ya creadas
+    # Agregar todas las columnas que puedan faltar (sin error si ya existen)
     for columna, tipo in [
         ("sku", "VARCHAR(100) UNIQUE"),
         ("precio_venta", "DECIMAL(10,2)"),
+        ("ubicacion", "VARCHAR(100)")
     ]:
         try:
-            cur.execute(f"ALTER TABLE piezas ADD COLUMN {columna} {tipo}")
+            cur.execute(f"ALTER TABLE piezas ADD COLUMN IF NOT EXISTS {columna} {tipo}")
         except:
             pass
 
     try:
-        cur.execute("ALTER TABLE compras ADD COLUMN equivalencia_id INTEGER REFERENCES equivalencias_proveedor(id)")
+        cur.execute("ALTER TABLE compras ADD COLUMN IF NOT EXISTS equivalencia_id INTEGER REFERENCES equivalencias_proveedor(id)")
     except:
         pass
 
     conn.commit()
     conn.close()
-    return "✅ Tablas y columnas actualizadas correctamente."
+    return "✅ Todas las columnas necesarias han sido agregadas. Piezas, Compras y Ventas ya deberían funcionar."
 
 if __name__ == '__main__':
     app.run(debug=True)
