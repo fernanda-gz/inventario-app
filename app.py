@@ -451,6 +451,23 @@ def reportes():
     return render_template('reportes.html')
 
 # ------------------------------------------------------------
+# Ruta para agregar la columna numero_factura (solución única)
+# ------------------------------------------------------------
+@app.route('/agregar-columna')
+def agregar_columna():
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        cur.execute("ALTER TABLE compras ADD COLUMN IF NOT EXISTS numero_factura VARCHAR(100)")
+        conn.commit()
+        mensaje = "✅ Columna 'numero_factura' agregada exitosamente."
+    except Exception as e:
+        mensaje = f"❌ Error: {e}"
+    finally:
+        conn.close()
+    return mensaje
+
+# ------------------------------------------------------------
 # Ruta mágica: agrega todas las columnas faltantes
 # ------------------------------------------------------------
 @app.route('/crear-tablas')
