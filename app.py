@@ -342,51 +342,52 @@ def agregar_equivalencia():
     return jsonify({'success': True})
 
 # ------------------------------------------------------------
-# Compras (ahora multi‑ítem)
+# Compras (multi‑ítem)
 # ------------------------------------------------------------
 @app.route('/compras', methods=['GET', 'POST'])
 def compras():
     conn = get_db()
     if request.method == 'POST':
-        fecha = request.form['fecha']
-        proveedor_id = request.form['proveedor_id']
-        numero_factura = request.form.get('numero_factura', '')
-        piezas_ids = request.form.getlist('pieza_id[]')
-        cantidades = request.form.getlist('cantidad[]')
-        precios = request.form.getlist('precio_unitario[]')
+        try:
+            fecha = request.form['fecha']
+            proveedor_id = request.form['proveedor_id']
+            numero_factura = request.form.get('numero_factura', '')
+            piezas_ids = request.form.getlist('pieza_id[]')
+            cantidades = request.form.getlist('cantidad[]')
+            precios = request.form.getlist('precio_unitario[]')
 
-        cur = conn.cursor()
-        for pieza_id, cantidad, precio in zip(piezas_ids, cantidades, precios):
-            if not pieza_id or not cantidad:
-                continue
-            cantidad = int(cantidad)
-            precio = float(precio) if precio else 0.0
-            total = cantidad * precio
+            cur = conn.cursor()
+            for pieza_id, cantidad, precio in zip(piezas_ids, cantidades, precios):
+                if not pieza_id or not cantidad:
+                    continue
+                cantidad = int(cantidad)
+                precio = float(precio) if precio else 0.0
+                total = cantidad * precio
 
-            # Buscar o crear equivalencia
-            cur.execute("SELECT id FROM equivalencias_proveedor WHERE pieza_id=%s AND proveedor_id=%s",
-                        (pieza_id, proveedor_id))
-            eq = cur.fetchone()
-            if not eq:
+                cur.execute("SELECT id FROM equivalencias_proveedor WHERE pieza_id=%s AND proveedor_id=%s",
+                            (pieza_id, proveedor_id))
+                eq = cur.fetchone()
+                if not eq:
+                    cur.execute("""
+                        INSERT INTO equivalencias_proveedor (pieza_id, proveedor_id, codigo_proveedor, nombre_proveedor)
+                        VALUES (%s, %s, %s, %s) RETURNING id
+                    """, (pieza_id, proveedor_id, f"COD-{pieza_id}-{proveedor_id}", ''))
+                    eq_id = cur.fetchone()['id']
+                else:
+                    eq_id = eq['id']
+
                 cur.execute("""
-                    INSERT INTO equivalencias_proveedor (pieza_id, proveedor_id, codigo_proveedor, nombre_proveedor)
-                    VALUES (%s, %s, %s, %s) RETURNING id
-                """, (pieza_id, proveedor_id, f"COD-{pieza_id}-{proveedor_id}", ''))
-                eq_id = cur.fetchone()['id']
-            else:
-                eq_id = eq['id']
-
-            cur.execute("""
-                INSERT INTO compras (fecha, proveedor_id, equivalencia_id, cantidad, precio_unitario, total, numero_factura)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (fecha, proveedor_id, eq_id, cantidad, precio, total, numero_factura))
-
-            # Actualizar stock
-            cur.execute("UPDATE piezas SET stock_actual = stock_actual + %s WHERE id = %s",
-                        (cantidad, pieza_id))
-        conn.commit()
-        conn.close()
-        return redirect(url_for('compras'))
+                    INSERT INTO compras (fecha, proveedor_id, equivalencia_id, cantidad, precio_unitario, total, numero_factura)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (fecha, proveedor_id, eq_id, cantidad, precio, total, numero_factura))
+                cur.execute("UPDATE piezas SET stock_actual = stock_actual + %s WHERE id = %s",
+                            (cantidad, pieza_id))
+            conn.commit()
+            conn.close()
+            return redirect(url_for('compras'))
+        except Exception as e:
+            conn.close()
+            return f"<h1>Error al registrar compra</h1><pre>{str(e)}</pre>", 500
 
     # GET
     cur = conn.cursor()
@@ -408,7 +409,7 @@ def compras():
     return render_template('compras.html', compras=lista_compras, piezas=piezas, proveedores=proveedores, hoy=datetime.now().strftime('%Y-%m-%d'))
 
 # ------------------------------------------------------------
-# Ventas (por ahora simple, luego podemos hacer multi‑ítem)
+# Ventas
 # ------------------------------------------------------------
 @app.route('/ventas', methods=['GET', 'POST'])
 def ventas():
@@ -511,7 +512,7 @@ def crear_tablas():
         CREATE INDEX IF NOT EXISTS idx_compras_fecha ON compras(fecha);
     """)
 
-    # Agregar columnas que puedan faltar
+    # Agregar columnas que puedan faltar en tablas ya existentes
     for columna, tipo in [
         ("sku", "VARCHAR(100) UNIQUE"),
         ("precio_venta", "DECIMAL(10,2)"),
@@ -524,6 +525,11 @@ def crear_tablas():
 
     try:
         cur.execute("ALTER TABLE compras ADD COLUMN IF NOT EXISTS equivalencia_id INTEGER REFERENCES equivalencias_proveedor(id)")
+    except:
+        pass
+
+    try:
+        cur.execute("ALTER TABLE compras ADD COLUMN IF NOT EXISTS numero_factura VARCHAR(100)")
     except:
         pass
 
