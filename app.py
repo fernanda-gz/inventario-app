@@ -23,6 +23,7 @@ def get_db():
             port=result.port
         )
     else:
+        # Desarrollo local (opcional)
         conn = psycopg2.connect(
             database="inventario",
             user="postgres",
@@ -341,47 +342,62 @@ def agregar_equivalencia():
     return jsonify({'success': True})
 
 # ------------------------------------------------------------
-# Compras
+# Compras (ahora multi‑ítem)
 # ------------------------------------------------------------
 @app.route('/compras', methods=['GET', 'POST'])
 def compras():
     conn = get_db()
     if request.method == 'POST':
-        data = request.form
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM equivalencias_proveedor WHERE pieza_id=%s AND proveedor_id=%s",
-                    (data['pieza_id'], data['proveedor_id']))
-        eq = cur.fetchone()
-        if not eq:
-            cur.execute("""
-                INSERT INTO equivalencias_proveedor (pieza_id, proveedor_id, codigo_proveedor, nombre_proveedor)
-                VALUES (%s, %s, %s, %s) RETURNING id
-            """, (data['pieza_id'], data['proveedor_id'], data.get('codigo_proveedor', ''), data.get('nombre_proveedor', '')))
-            eq_id = cur.fetchone()['id']
-        else:
-            eq_id = eq['id']
+        fecha = request.form['fecha']
+        proveedor_id = request.form['proveedor_id']
+        numero_factura = request.form.get('numero_factura', '')
+        piezas_ids = request.form.getlist('pieza_id[]')
+        cantidades = request.form.getlist('cantidad[]')
+        precios = request.form.getlist('precio_unitario[]')
 
-        total = float(data['cantidad']) * float(data['precio_unitario'])
-        cur.execute("""
-            INSERT INTO compras (fecha, proveedor_id, equivalencia_id, cantidad, precio_unitario, total, numero_factura)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (data['fecha'], data['proveedor_id'], eq_id, data['cantidad'],
-              data['precio_unitario'], total, data.get('numero_factura', '')))
-        cur.execute("UPDATE piezas SET stock_actual = stock_actual + %s WHERE id = %s",
-                    (data['cantidad'], data['pieza_id']))
+        cur = conn.cursor()
+        for pieza_id, cantidad, precio in zip(piezas_ids, cantidades, precios):
+            if not pieza_id or not cantidad:
+                continue
+            cantidad = int(cantidad)
+            precio = float(precio) if precio else 0.0
+            total = cantidad * precio
+
+            # Buscar o crear equivalencia
+            cur.execute("SELECT id FROM equivalencias_proveedor WHERE pieza_id=%s AND proveedor_id=%s",
+                        (pieza_id, proveedor_id))
+            eq = cur.fetchone()
+            if not eq:
+                cur.execute("""
+                    INSERT INTO equivalencias_proveedor (pieza_id, proveedor_id, codigo_proveedor, nombre_proveedor)
+                    VALUES (%s, %s, %s, %s) RETURNING id
+                """, (pieza_id, proveedor_id, f"COD-{pieza_id}-{proveedor_id}", ''))
+                eq_id = cur.fetchone()['id']
+            else:
+                eq_id = eq['id']
+
+            cur.execute("""
+                INSERT INTO compras (fecha, proveedor_id, equivalencia_id, cantidad, precio_unitario, total, numero_factura)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (fecha, proveedor_id, eq_id, cantidad, precio, total, numero_factura))
+
+            # Actualizar stock
+            cur.execute("UPDATE piezas SET stock_actual = stock_actual + %s WHERE id = %s",
+                        (cantidad, pieza_id))
         conn.commit()
         conn.close()
         return redirect(url_for('compras'))
 
+    # GET
     cur = conn.cursor()
     cur.execute("""
-        SELECT c.id, c.fecha, p.nombre as proveedor, pi.nombre_interno, c.cantidad, c.precio_unitario, c.total
+        SELECT c.id, c.fecha, p.nombre as proveedor, pi.nombre_interno, c.cantidad
         FROM compras c
         JOIN proveedores p ON c.proveedor_id = p.id
         JOIN equivalencias_proveedor ep ON c.equivalencia_id = ep.id
         JOIN piezas pi ON ep.pieza_id = pi.id
         ORDER BY c.fecha DESC
-        LIMIT 100
+        LIMIT 50
     """)
     lista_compras = cur.fetchall()
     cur.execute("SELECT id, nombre_interno FROM piezas WHERE activo=true ORDER BY nombre_interno")
@@ -392,7 +408,7 @@ def compras():
     return render_template('compras.html', compras=lista_compras, piezas=piezas, proveedores=proveedores, hoy=datetime.now().strftime('%Y-%m-%d'))
 
 # ------------------------------------------------------------
-# Ventas
+# Ventas (por ahora simple, luego podemos hacer multi‑ítem)
 # ------------------------------------------------------------
 @app.route('/ventas', methods=['GET', 'POST'])
 def ventas():
@@ -434,7 +450,7 @@ def reportes():
     return render_template('reportes.html')
 
 # ------------------------------------------------------------
-# Ruta MÁGICA: agrega TODAS las columnas faltantes
+# Ruta mágica: agrega todas las columnas faltantes
 # ------------------------------------------------------------
 @app.route('/crear-tablas')
 def crear_tablas():
@@ -495,7 +511,7 @@ def crear_tablas():
         CREATE INDEX IF NOT EXISTS idx_compras_fecha ON compras(fecha);
     """)
 
-    # Agregar todas las columnas que puedan faltar (sin error si ya existen)
+    # Agregar columnas que puedan faltar
     for columna, tipo in [
         ("sku", "VARCHAR(100) UNIQUE"),
         ("precio_venta", "DECIMAL(10,2)"),
